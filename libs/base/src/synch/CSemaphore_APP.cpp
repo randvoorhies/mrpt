@@ -53,7 +53,7 @@ CSemaphore::CSemaphore(
     sem_private token = m_data.getAs<sem_private>();
 
     // Open it or create if not existing:
-    token->semid = sem_open(m_name.c_str(), O_CREAT, 644 /* permisions */, initialCount );
+    token->semid = sem_open(m_name.c_str(), O_CREAT, 0644 /* permisions */, initialCount );
 
     if (token->semid==SEM_FAILED)
       THROW_EXCEPTION( format("Creating semaphore (name='%s') raised error: %s",m_name.c_str(),strerror(errno) ) )
@@ -81,7 +81,10 @@ CSemaphore::~CSemaphore()
     if(isNamed())
     {
       sem_private token = m_data.getAs<sem_private>();
-      sem_destroy(token->semid);
+      if( sem_close(token->semid) != 0 )
+        fprintf(stderr, "Creating semaphore (name='%s') raised error: %s",m_name.c_str(), strerror(errno) );
+
+      printf("CLOSING SEMAPHORE!\n");
     }
     else
     {
@@ -100,34 +103,42 @@ bool CSemaphore::waitForSignal( unsigned int timelimit )
 
   if(isNamed())
   {
-    struct timeb endtime;
-
-    const long sec = timelimit / 1000;
-    const long millisec = timelimit % 1000;
-    ftime( &endtime );
-    endtime.time += sec;
-    endtime.millitm += millisec;
-    if( endtime.millitm > 999 )
-    {
-        endtime.millitm -= 1000;
-        endtime.time++;
-    }
-
     sem_private token = m_data.getAs<sem_private>();
 
-    struct timeb nowtime;
-    ftime( &endtime );
-    int rc;
-    // Mac version: we don't have sem_timedwait()
-    do
+    if( timelimit == 0)
     {
-      rc = sem_trywait(token->semid);
-      mrpt::system::sleep(1);
-      ftime( &endtime );
+      return sem_wait(token->semid) == 0;
     }
-    while(rc != 0 || (endtime.time > nowtime.time && endtime.millitm > nowtime.millitm));
+    else
+    {
+      struct timeb endtime;
 
-    return (rc == 0); // true: all ok.
+      const long sec = timelimit / 1000;
+      const long millisec = timelimit % 1000;
+      ftime( &endtime );
+      endtime.time += sec;
+      endtime.millitm += millisec;
+      if( endtime.millitm > 999 )
+      {
+        endtime.millitm -= 1000;
+        endtime.time++;
+      }
+
+      sem_private token = m_data.getAs<sem_private>();
+
+      struct timeb nowtime;
+      ftime( &endtime );
+      int rc;
+      do
+      {
+        rc = sem_trywait(token->semid);
+        mrpt::system::sleep(1);
+        ftime( &nowtime );
+      }
+      while(rc != 0 || (endtime.time > nowtime.time && endtime.millitm > nowtime.millitm));
+
+      return (rc == 0); // true: all ok.
+    }
   }
   else
   {
